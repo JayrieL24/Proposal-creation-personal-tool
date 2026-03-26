@@ -1,10 +1,15 @@
-import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+
+try {
+  await import("dotenv/config");
+} catch (_error) {
+  // dotenv is optional in production when env vars are provided by the platform.
+}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
