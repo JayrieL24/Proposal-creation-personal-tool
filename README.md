@@ -98,4 +98,5 @@ Use browser refresh to see `frontend/` file changes.
 
 - `POST /api/webhook-v1`
 - `GET /api/latest-record`
+- `GET /api/records`
 - `GET /api/health`

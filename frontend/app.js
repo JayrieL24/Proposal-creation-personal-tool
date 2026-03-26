@@ -20,6 +20,8 @@ const ui = {
   statusText: document.getElementById("statusText"),
   rowText: document.getElementById("rowText"),
   updatedText: document.getElementById("updatedText"),
+  rowSelect: document.getElementById("rowSelect"),
+  rowCountText: document.getElementById("rowCountText"),
   tableBody: document.getElementById("fieldTableBody"),
   promptOutput: document.getElementById("promptOutput"),
   promptLanguage: document.getElementById("promptLanguage"),
@@ -28,6 +30,8 @@ const ui = {
 };
 
 let currentRecord = null;
+let latestRecord = null;
+const recordsByRowId = new Map();
 const includeMap = new Map();
 
 for (const field of FIELDS) {
@@ -128,35 +132,71 @@ function setStatus(text) {
   ui.statusText.textContent = text;
 }
 
-async function fetchLatestRecord() {
+function setCurrentRecord(record) {
+  currentRecord = record;
+  updateMeta();
+  renderTable();
+  renderPrompt();
+}
+
+function updateRowSelect() {
+  const rowIds = Array.from(recordsByRowId.keys())
+    .sort((a, b) => Number(a) - Number(b));
+  const existingValue = ui.rowSelect.value;
+  let options = '<option value="">Latest</option>';
+  for (const rowId of rowIds) {
+    options += `<option value="${escapeHtml(rowId)}">Row ${escapeHtml(rowId)}</option>`;
+  }
+  ui.rowSelect.innerHTML = options;
+  ui.rowCountText.textContent = `Rows loaded: ${rowIds.length}`;
+
+  if (existingValue && recordsByRowId.has(existingValue)) {
+    ui.rowSelect.value = existingValue;
+  } else {
+    ui.rowSelect.value = "";
+  }
+}
+
+function applySelectedRow() {
+  const selectedRowId = ui.rowSelect.value;
+  if (!selectedRowId) {
+    setCurrentRecord(latestRecord);
+    return;
+  }
+  setCurrentRecord(recordsByRowId.get(selectedRowId) || latestRecord);
+}
+
+async function fetchRecords() {
   try {
-    const response = await fetch("/api/latest-record", { cache: "no-store" });
-    if (response.status === 404) {
+    const response = await fetch("/api/records", { cache: "no-store" });
+    if (!response.ok) {
       setStatus("No records yet.");
       return;
     }
-    if (!response.ok) {
-      setStatus(`Failed to fetch latest record (${response.status})`);
-      return;
-    }
     const data = await response.json();
-    if (!data?.record) {
-      setStatus("Latest record payload was empty.");
+    if (!Array.isArray(data?.records)) {
+      setStatus("Records payload was empty.");
       return;
     }
 
-    currentRecord = data.record;
-    setStatus("Connected. Latest record loaded.");
-    updateMeta();
-    renderTable();
-    renderPrompt();
+    recordsByRowId.clear();
+    data.records.forEach((record) => {
+      const rowId = String(record?.meta?.rowId ?? "");
+      if (rowId) recordsByRowId.set(rowId, record);
+    });
+
+    latestRecord = data.records[data.records.length - 1] || null;
+    updateRowSelect();
+    applySelectedRow();
+    setStatus(`Connected. ${data.count || 0} row(s) loaded.`);
   } catch (error) {
     setStatus(`Network error: ${error.message}`);
   }
 }
 
 ui.promptLanguage.addEventListener("change", renderPrompt);
-ui.refreshBtn.addEventListener("click", fetchLatestRecord);
+ui.refreshBtn.addEventListener("click", fetchRecords);
+ui.rowSelect.addEventListener("change", applySelectedRow);
 ui.copyBtn.addEventListener("click", async () => {
   try {
     await navigator.clipboard.writeText(ui.promptOutput.value);
@@ -174,5 +214,5 @@ ui.copyBtn.addEventListener("click", async () => {
 
 renderTable();
 renderPrompt();
-fetchLatestRecord();
-setInterval(fetchLatestRecord, POLL_MS);
+fetchRecords();
+setInterval(fetchRecords, POLL_MS);

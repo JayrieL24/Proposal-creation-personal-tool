@@ -22,6 +22,7 @@ app.use(express.static(path.join(__dirname, "..", "frontend")));
 
 const dedupeSet = new Set();
 let lastRecord = null;
+const recordsByRowId = new Map();
 const CACHE_PATH = path.join(__dirname, "translation-cache.json");
 const translationCache = new Map();
 
@@ -183,6 +184,7 @@ app.post("/api/webhook-v1", async (req, res) => {
   normalized.translated = await translateRecord(normalized);
 
   lastRecord = normalized;
+  recordsByRowId.set(String(rowId), normalized);
   console.log("[webhook-v1] got record", key);
   return res.status(200).json({ status: "ok", record: normalized });
 });
@@ -192,6 +194,15 @@ app.get("/api/latest-record", (req, res) => {
     return res.status(404).json({ error: "No record yet" });
   }
   res.status(200).json({ record: lastRecord });
+});
+
+app.get("/api/records", (req, res) => {
+  const records = Array.from(recordsByRowId.values())
+    .sort((a, b) => Number(a?.meta?.rowId || 0) - Number(b?.meta?.rowId || 0));
+  res.status(200).json({
+    count: records.length,
+    records
+  });
 });
 
 app.get("/api/health", (req, res) => {

@@ -55,12 +55,17 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
 select,
 button,
 textarea {
   font: inherit;
+}
+
+#rowCountText {
+  color: var(--muted);
 }
 
 button {
