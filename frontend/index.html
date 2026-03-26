@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Proposal Prompt Builder</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="header">
+        <h1>Proposal Prompt Builder</h1>
+        <p>Live from Google Sheets webhook pipeline</p>
+      </header>
+
+      <section class="panel status-panel">
+        <div>
+          <strong>Status:</strong>
+          <span id="statusText">Waiting for first record...</span>
+        </div>
+        <div>
+          <strong>Row:</strong>
+          <span id="rowText">-</span>
+        </div>
+        <div>
+          <strong>Updated:</strong>
+          <span id="updatedText">-</span>
+        </div>
+      </section>
+
+      <section class="panel controls">
+        <label for="promptLanguage">Prompt language</label>
+        <select id="promptLanguage">
+          <option value="auto">Auto (EN -> SK)</option>
+          <option value="en">English only</option>
+          <option value="sk">Slovak only</option>
+        </select>
+        <button id="refreshBtn" type="button">Refresh now</button>
+      </section>
+
+      <section class="panel">
+        <table>
+          <thead>
+            <tr>
+              <th>Field</th>
+              <th>SK Value</th>
+              <th>EN Value</th>
+              <th>Include</th>
+            </tr>
+          </thead>
+          <tbody id="fieldTableBody"></tbody>
+        </table>
+      </section>
+
+      <section class="panel prompt-panel">
+        <div class="prompt-header">
+          <h2>Generated Prompt</h2>
+          <button id="copyBtn" type="button">Copy prompt</button>
+        </div>
+        <textarea id="promptOutput" rows="14" readonly></textarea>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+  </html>
