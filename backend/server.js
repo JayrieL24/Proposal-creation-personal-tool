@@ -298,24 +298,71 @@ app.post("/api/webhook-v1", async (req, res) => {
   try {
     const startedAt = Date.now();
     const body = req.body;
-    if (!body || !body.meta || !body.meta.eventId || !body.meta.rowId) {
+    if (!body || !body.meta || !body.meta.eventId) {
       logWarn("webhook.invalid_body", { hasMeta: Boolean(body?.meta) });
-      return res.status(400).json({ error: "Invalid body: meta.eventId + meta.rowId required" });
+      return res.status(400).json({ error: "Invalid body: meta.eventId required" });
     }
 
     if (!isWebhookAuthorized(req)) {
-      logWarn("webhook.unauthorized", { rowId: body.meta.rowId, sheetName: body.meta.sheetName || null });
+      logWarn("webhook.unauthorized", { sheetName: body.meta.sheetName || null });
       return res.status(401).json({ error: "Unauthorized webhook request" });
     }
 
-    const { sheetName, rowId, eventId } = body.meta;
+    const { sheetName, eventId } = body.meta;
+
+    // Handle sync action (remove rows not in existingRowIds)
+    if (body.action === "sync") {
+      const existingRowIds = body.meta.existingRowIds || [];
+      const key = `${sheetName}:sync:${eventId}`;
+      
+      const reserved = await reserveEventKey(key);
+      if (!reserved) {
+        logInfo("webhook.duplicate_ignored", { key });
+        return res.status(200).json({ status: "duplicate_ignored" });
+      }
+
+      if (!useDb) {
+        const currentRowIds = Array.from(recordsByRowId.keys()).map(id => parseInt(id));
+        const toDelete = currentRowIds.filter(id => !existingRowIds.includes(id));
+        toDelete.forEach(id => recordsByRowId.delete(String(id)));
+        logInfo("webhook.sync_completed", { key, deleted: toDelete.length, kept: existingRowIds.length });
+        return res.status(200).json({ status: "synced", deleted: toDelete.length });
+      }
+
+      const result = await pool.query(
+        "DELETE FROM proposal_records WHERE sheet_name = $1 AND row_id != ALL($2::int[])",
+        [sheetName, existingRowIds]
+      );
+      
+      logInfo("webhook.sync_completed", { key, deleted: result.rowCount, kept: existingRowIds.length, durationMs: Date.now() - startedAt });
+      return res.status(200).json({ status: "synced", deleted: result.rowCount });
+    }
+
+    // Require rowId for non-sync actions
+    if (!body.meta.rowId) {
+      logWarn("webhook.invalid_body", { reason: "rowId required for non-sync actions" });
+      return res.status(400).json({ error: "Invalid body: meta.rowId required" });
+    }
+
+    const { rowId } = body.meta;
     const key = `${sheetName}:${rowId}:${eventId}`;
-    logInfo("webhook.received", { key, sheetName, rowId, eventId });
+    logInfo("webhook.received", { key, sheetName, rowId, eventId, action: body.action || "update" });
 
     const reserved = await reserveEventKey(key);
     if (!reserved) {
       logInfo("webhook.duplicate_ignored", { key });
       return res.status(200).json({ status: "duplicate_ignored" });
+    }
+
+    // Handle deletion
+    if (body.action === "delete") {
+      if (!useDb) {
+        recordsByRowId.delete(String(rowId));
+      } else {
+        await pool.query("DELETE FROM proposal_records WHERE row_id = $1", [rowId]);
+      }
+      logInfo("webhook.row_deleted", { key, rowId, sheetName, durationMs: Date.now() - startedAt });
+      return res.status(200).json({ status: "deleted", rowId });
     }
 
     const normalized = normalizeRecord(body);
@@ -392,6 +439,31 @@ app.get("/api/health", async (req, res) => {
     translationProvider: translationConfig.provider,
     translationTarget: translationConfig.to
   });
+});
+
+app.post("/api/delete-rows", async (req, res) => {
+  try {
+    const { rowIds } = req.body;
+    if (!Array.isArray(rowIds) || rowIds.length === 0) {
+      return res.status(400).json({ error: "rowIds array required" });
+    }
+
+    if (!useDb) {
+      rowIds.forEach(rowId => recordsByRowId.delete(String(rowId)));
+      return res.status(200).json({ status: "ok", deleted: rowIds.length });
+    }
+
+    const result = await pool.query(
+      "DELETE FROM proposal_records WHERE row_id = ANY($1::int[])",
+      [rowIds]
+    );
+
+    logInfo("rows.deleted", { rowIds, count: result.rowCount });
+    res.status(200).json({ status: "ok", deleted: result.rowCount });
+  } catch (error) {
+    logError("delete_rows.error", { error: error.message });
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 try {

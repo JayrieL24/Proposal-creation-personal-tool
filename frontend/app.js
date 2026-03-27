@@ -16,9 +16,7 @@ const FIELDS = [
 const EXCLUDED_BY_DEFAULT = new Set(["Web price"]);
 const TRANSLATION_TOGGLE_FIELDS = new Set(["Industry", "Erik's call notes", "Info for Coders"]);
 const POLL_MS = 3000;
-const API_BASE = window.location.hostname.includes("onrender.com")
-  ? ""
-  : "https://proposal-creation-personal-tool.onrender.com";
+const API_BASE = "https://proposal-creation-personal-tool.onrender.com";
 
 function makeDefaultColumns() {
   const columns = [
