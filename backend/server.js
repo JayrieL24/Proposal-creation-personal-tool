@@ -28,6 +28,7 @@ const recordsByRowId = new Map();
 const CACHE_PATH = path.join(__dirname, "translation-cache.json");
 const translationCache = new Map();
 const DATABASE_URL = process.env.DATABASE_URL || "";
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || "";
 const useDb = Boolean(DATABASE_URL);
 const pool = useDb
   ? new Pool({
@@ -65,9 +66,21 @@ const translationConfig = {
 
 loadTranslationCache();
 
+function logInfo(event, payload = {}) {
+  console.log(JSON.stringify({ level: "info", event, timestamp: new Date().toISOString(), ...payload }));
+}
+
+function logWarn(event, payload = {}) {
+  console.warn(JSON.stringify({ level: "warn", event, timestamp: new Date().toISOString(), ...payload }));
+}
+
+function logError(event, payload = {}) {
+  console.error(JSON.stringify({ level: "error", event, timestamp: new Date().toISOString(), ...payload }));
+}
+
 async function initializeDatabase() {
   if (!useDb) {
-    console.log("[db] DATABASE_URL not set. Running in memory mode.");
+    logWarn("db.disabled", { reason: "DATABASE_URL not set", persistence: "memory" });
     return;
   }
 
@@ -88,7 +101,7 @@ async function initializeDatabase() {
     )
   `);
 
-  console.log("[db] postgres ready");
+  logInfo("db.ready", { persistence: "postgres" });
 }
 
 function normalizeRecord(raw) {
@@ -133,6 +146,19 @@ function canUseTranslation() {
   if (!translationConfig.enabled) return false;
   if (translationConfig.provider !== "azure") return false;
   return Boolean(translationConfig.key && translationConfig.region);
+}
+
+function isRecordEmpty(record) {
+  return FIELDS.every((field) => {
+    const value = record[field];
+    return value === null || value === undefined || value === "";
+  });
+}
+
+function isWebhookAuthorized(req) {
+  if (!WEBHOOK_SECRET) return true;
+  const provided = req.get("x-webhook-secret");
+  return provided === WEBHOOK_SECRET;
 }
 
 function cacheKey(from, to, text) {
@@ -195,7 +221,7 @@ async function translateRecord(record) {
       translated[field] = await translateText(String(value));
     } catch (error) {
       translated[field] = null;
-      console.error(`[translation] field "${field}" failed`, error.message);
+      logError("translation.field_failed", { field, error: error.message });
     }
   }
 
@@ -270,29 +296,49 @@ async function getAllRecords() {
 
 app.post("/api/webhook-v1", async (req, res) => {
   try {
+    const startedAt = Date.now();
     const body = req.body;
     if (!body || !body.meta || !body.meta.eventId || !body.meta.rowId) {
+      logWarn("webhook.invalid_body", { hasMeta: Boolean(body?.meta) });
       return res.status(400).json({ error: "Invalid body: meta.eventId + meta.rowId required" });
+    }
+
+    if (!isWebhookAuthorized(req)) {
+      logWarn("webhook.unauthorized", { rowId: body.meta.rowId, sheetName: body.meta.sheetName || null });
+      return res.status(401).json({ error: "Unauthorized webhook request" });
     }
 
     const { sheetName, rowId, eventId } = body.meta;
     const key = `${sheetName}:${rowId}:${eventId}`;
+    logInfo("webhook.received", { key, sheetName, rowId, eventId });
 
     const reserved = await reserveEventKey(key);
     if (!reserved) {
+      logInfo("webhook.duplicate_ignored", { key });
       return res.status(200).json({ status: "duplicate_ignored" });
     }
 
     const normalized = normalizeRecord(body);
+    if (isRecordEmpty(normalized)) {
+      logInfo("webhook.empty_row_ignored", { key, rowId, sheetName });
+      return res.status(200).json({ status: "empty_row_ignored" });
+    }
+
     normalized.translated = await translateRecord(normalized);
 
     await saveRecord(normalized);
     lastRecord = normalized;
     recordsByRowId.set(String(rowId), normalized);
-    console.log("[webhook-v1] got record", key);
+    logInfo("webhook.processed", {
+      key,
+      rowId,
+      sheetName,
+      translated: Boolean(normalized.translated),
+      durationMs: Date.now() - startedAt
+    });
     return res.status(200).json({ status: "ok", record: normalized });
   } catch (error) {
-    console.error("[webhook-v1] error", error);
+    logError("webhook.error", { error: error.message });
     return res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -305,7 +351,7 @@ app.get("/api/latest-record", async (req, res) => {
     }
     res.status(200).json({ record });
   } catch (error) {
-    console.error("[latest-record] error", error);
+    logError("latest_record.error", { error: error.message });
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -318,15 +364,30 @@ app.get("/api/records", async (req, res) => {
       records
     });
   } catch (error) {
-    console.error("[records] error", error);
+    logError("records.error", { error: error.message });
     res.status(500).json({ error: "Internal server error" });
   }
 });
 
-app.get("/api/health", (req, res) => {
+app.get("/api/health", async (req, res) => {
+  let database = {
+    enabled: useDb,
+    status: useDb ? "unknown" : "disabled"
+  };
+
+  if (useDb) {
+    try {
+      await pool.query("SELECT 1");
+      database = { enabled: true, status: "ok" };
+    } catch (error) {
+      database = { enabled: true, status: "error", error: error.message };
+    }
+  }
+
   res.status(200).json({
     status: "ok",
     persistence: useDb ? "postgres" : "memory",
+    database,
     translationEnabled: canUseTranslation(),
     translationProvider: translationConfig.provider,
     translationTarget: translationConfig.to
@@ -339,6 +400,6 @@ try {
     console.log(`Server listening on port ${PORT}`);
   });
 } catch (error) {
-  console.error("[startup] failed to initialize server", error);
+  logError("startup.failed", { error: error.message });
   process.exit(1);
 }

@@ -99,6 +99,7 @@ table {
   width: 100%;
   border-collapse: collapse;
   table-layout: auto;
+  min-width: 1200px;
 }
 
 th,
@@ -117,12 +118,35 @@ th {
 
 .sheet-table th {
   user-select: none;
-  cursor: grab;
+  cursor: default;
   white-space: nowrap;
 }
 
-.sheet-table th:active {
-  cursor: grabbing;
+.sheet-table td {
+  white-space: nowrap;
+}
+
+.table-scroll {
+  overflow-x: auto;
+  border-radius: 8px;
+}
+
+.th-inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.translate-icon-btn {
+  border: 1px solid #b5cdc7;
+  background: #fff;
+  color: var(--accent-ink);
+  border-radius: 999px;
+  padding: 0 6px;
+  font-size: 0.72rem;
+  line-height: 1.2;
+  box-shadow: none;
+  min-height: 18px;
 }
 
 .sheet-table tbody tr:hover td {
@@ -179,6 +203,17 @@ th {
   font-weight: 600;
 }
 
+.icon-btn {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  line-height: 1;
+}
+
 textarea {
   width: 100%;
   border: 1px solid var(--line);
@@ -220,12 +255,43 @@ textarea {
   display: none;
 }
 
+.hidden {
+  display: none !important;
+}
+
 .modal-panel {
   width: min(780px, 100%);
   max-height: calc(100vh - 32px);
   overflow: auto;
   margin-top: 0;
   border: 1px solid #c6d5ce;
+}
+
+.translation-card {
+  position: fixed;
+  left: 24px;
+  top: 24px;
+  z-index: 95;
+  width: min(360px, calc(100vw - 32px));
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 14px 28px rgba(25, 37, 33, 0.2);
+  padding: 12px;
+}
+
+.translation-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  gap: 8px;
+}
+
+.translation-card-body {
+  display: grid;
+  gap: 8px;
+  font-size: 0.95rem;
 }
 
 @media (max-width: 900px) {

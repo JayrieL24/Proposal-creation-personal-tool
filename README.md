@@ -91,6 +91,34 @@ Notes:
 - With Postgres enabled, records and dedupe events persist across restarts.
 - Health endpoint shows persistence mode: `memory` or `postgres`.
 
+## Webhook Security
+
+You can protect the webhook endpoint with a shared secret.
+
+Set in `.env`:
+
+```env
+WEBHOOK_SECRET=your_shared_secret
+```
+
+When set, backend requires this header on webhook calls:
+
+```text
+x-webhook-secret: your_shared_secret
+```
+
+Without the correct header, `/api/webhook-v1` returns `401`.
+
+## Empty Row Filtering
+
+Webhook payloads where all tracked fields are empty are ignored with:
+
+```json
+{ "status": "empty_row_ignored" }
+```
+
+This prevents blank rows from polluting your dataset.
+
 ## Start Backend and Frontend Separately
 
 This project currently serves the frontend from Express, so backend and frontend run in one process.
@@ -117,3 +145,13 @@ Use browser refresh to see `frontend/` file changes.
 - `GET /api/latest-record`
 - `GET /api/records`
 - `GET /api/health`
+
+`GET /api/health` includes DB status when Postgres is enabled:
+
+```json
+{
+  "status": "ok",
+  "persistence": "postgres",
+  "database": { "enabled": true, "status": "ok" }
+}
+```

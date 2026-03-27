@@ -35,10 +35,12 @@
 
       <section class="panel">
         <h2>Rows</h2>
-        <table class="sheet-table">
-          <thead id="rowTableHead"></thead>
-          <tbody id="rowTableBody"></tbody>
-        </table>
+        <div class="table-scroll">
+          <table class="sheet-table">
+            <thead id="rowTableHead"></thead>
+            <tbody id="rowTableBody"></tbody>
+          </table>
+        </div>
       </section>
 
       <button id="openPromptBtn" class="fab-btn" type="button">Prompt Builder</button>
@@ -48,7 +50,9 @@
           <div class="prompt-header">
             <h2 id="promptModalTitle">Prompt Builder</h2>
             <div class="modal-actions">
-              <button id="copyBtn" type="button">Copy Prompt</button>
+              <button id="copyBtn" class="icon-btn" type="button" title="Copy Prompt" aria-label="Copy Prompt">&#128203;</button>
+              <button id="resetPromptBtn" class="btn-ghost" type="button">Reset</button>
+              <button id="undoResetBtn" class="btn-ghost hidden" type="button">Undo Reset</button>
               <button id="closePromptBtn" class="btn-ghost" type="button">Close</button>
             </div>
           </div>
@@ -58,7 +62,18 @@
             <option value="en">English only</option>
             <option value="sk">Slovak only</option>
           </select>
-          <textarea id="promptOutput" rows="20" readonly></textarea>
+          <textarea id="promptOutput" rows="20"></textarea>
+        </div>
+      </div>
+
+      <div id="translationCard" class="translation-card hidden" role="dialog" aria-live="polite">
+        <div class="translation-card-header">
+          <strong id="translationCardTitle">Translation</strong>
+          <button id="closeTranslationCardBtn" class="btn-ghost" type="button">Close</button>
+        </div>
+        <div class="translation-card-body">
+          <div><strong>SK:</strong> <span id="translationSkValue"></span></div>
+          <div><strong>EN:</strong> <span id="translationEnValue"></span></div>
         </div>
       </div>
     </main>

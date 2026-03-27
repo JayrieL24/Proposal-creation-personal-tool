@@ -14,21 +14,24 @@ const FIELDS = [
 ];
 
 const EXCLUDED_BY_DEFAULT = new Set(["Web price"]);
+const TRANSLATION_TOGGLE_FIELDS = new Set(["Industry", "Erik's call notes", "Info for Coders"]);
 const POLL_MS = 3000;
-const COLUMN_KEY = "proposal_rows_columns_v1";
 
-const DEFAULT_COLUMNS = [
-  { id: "select", label: "Use", type: "select" },
-  { id: "row", label: "Row", type: "meta" },
-  { id: "company_sk", label: "Company (SK)", type: "field", field: "Company", lang: "sk" },
-  { id: "company_en", label: "Company (EN)", type: "field", field: "Company", lang: "en" },
-  { id: "contact_sk", label: "Contact (SK)", type: "contact", lang: "sk" },
-  { id: "contact_en", label: "Contact (EN)", type: "contact", lang: "en" },
-  { id: "city_sk", label: "City (SK)", type: "field", field: "City", lang: "sk" },
-  { id: "city_en", label: "City (EN)", type: "field", field: "City", lang: "en" },
-  { id: "updated", label: "Updated", type: "meta" },
-  { id: "action", label: "Action", type: "action" }
-];
+function makeDefaultColumns() {
+  const columns = [
+    { id: "select", label: "Use", type: "select" },
+    { id: "row", label: "Row", type: "meta" }
+  ];
+
+  for (const field of FIELDS) {
+    columns.push({ id: `${field}_sk`, label: `${field} (SK)`, type: "field", field, lang: "sk" });
+  }
+
+  columns.push({ id: "updated", label: "Updated", type: "meta" });
+  return columns;
+}
+
+const DEFAULT_COLUMNS = makeDefaultColumns();
 
 const ui = {
   statusText: document.getElementById("statusText"),
@@ -40,43 +43,30 @@ const ui = {
   promptOutput: document.getElementById("promptOutput"),
   promptLanguage: document.getElementById("promptLanguage"),
   copyBtn: document.getElementById("copyBtn"),
+  resetPromptBtn: document.getElementById("resetPromptBtn"),
+  undoResetBtn: document.getElementById("undoResetBtn"),
   refreshBtn: document.getElementById("refreshBtn"),
   openPromptBtn: document.getElementById("openPromptBtn"),
   closePromptBtn: document.getElementById("closePromptBtn"),
-  promptModal: document.getElementById("promptModal")
+  promptModal: document.getElementById("promptModal"),
+  translationCard: document.getElementById("translationCard"),
+  translationCardTitle: document.getElementById("translationCardTitle"),
+  translationSkValue: document.getElementById("translationSkValue"),
+  translationEnValue: document.getElementById("translationEnValue"),
+  closeTranslationCardBtn: document.getElementById("closeTranslationCardBtn")
 };
 
 let currentRecord = null;
 let latestRecord = null;
+let isPromptDirty = false;
+let lastPromptBeforeReset = null;
+let hasExplicitNoSelection = false;
 const recordsByRowId = new Map();
 const includeMap = new Map();
-let columns = loadColumns();
+const columns = DEFAULT_COLUMNS;
 
 for (const field of FIELDS) {
   includeMap.set(field, !EXCLUDED_BY_DEFAULT.has(field));
-}
-
-function loadColumns() {
-  const raw = localStorage.getItem(COLUMN_KEY);
-  if (!raw) return [...DEFAULT_COLUMNS];
-  try {
-    const parsed = JSON.parse(raw);
-    const map = new Map(DEFAULT_COLUMNS.map((c) => [c.id, c]));
-    const sanitized = [];
-    parsed.forEach((id) => {
-      if (map.has(id)) sanitized.push(map.get(id));
-    });
-    DEFAULT_COLUMNS.forEach((column) => {
-      if (!sanitized.some((item) => item.id === column.id)) sanitized.push(column);
-    });
-    return sanitized;
-  } catch (_error) {
-    return [...DEFAULT_COLUMNS];
-  }
-}
-
-function saveColumns() {
-  localStorage.setItem(COLUMN_KEY, JSON.stringify(columns.map((column) => column.id)));
 }
 
 function escapeHtml(input) {
@@ -103,11 +93,6 @@ function getEnValue(field, record = currentRecord) {
   return record?.translated?.[field] ?? null;
 }
 
-function getValueByLanguage(field, lang, record = currentRecord) {
-  if (lang === "en") return getEnValue(field, record);
-  return getSkValue(field, record);
-}
-
 function choosePromptValue(field, record = currentRecord) {
   const mode = ui.promptLanguage.value;
   const sk = getSkValue(field, record);
@@ -118,43 +103,55 @@ function choosePromptValue(field, record = currentRecord) {
   return en ?? sk;
 }
 
-function getCompanyDisplay(record, lang = "sk") {
-  const company = getValueByLanguage("Company", lang, record);
+function templateValue(value) {
+  return value === null || value === undefined || value === "" ? "" : String(value);
+}
+
+function getCompanyDisplay(record) {
+  const company = getSkValue("Company", record);
   if (company) return company;
-  const first = getValueByLanguage("First", lang, record);
-  const last = getValueByLanguage("Last", lang, record);
+  const first = getSkValue("First", record);
+  const last = getSkValue("Last", record);
   const fallback = [first, last].filter(Boolean).join(" ").trim();
   return fallback || null;
 }
 
-function getContactDisplay(record, lang = "sk") {
-  const first = getValueByLanguage("First", lang, record);
-  const last = getValueByLanguage("Last", lang, record);
-  const full = [first, last].filter(Boolean).join(" ").trim();
-  return full || null;
-}
-
-function buildPromptForRecord(record) {
-  if (!record) return "";
-
-  const lines = [];
-  const companyValue = choosePromptValue("Company", record);
-  const firstValue = choosePromptValue("First", record);
-  const lastValue = choosePromptValue("Last", record);
-  const companyMissing = companyValue === null || companyValue === undefined || companyValue === "";
-  const fallbackName = [firstValue, lastValue]
-    .filter((value) => value !== null && value !== undefined && value !== "")
+function buildPromptTemplate(record) {
+  const ownerName = [templateValue(getSkValue("First", record)), templateValue(getSkValue("Last", record))]
+    .filter(Boolean)
     .join(" ")
     .trim();
+  const businessName = ownerName || templateValue(getSkValue("Company", record));
+  const industry = templateValue(getSkValue("Industry", record));
+  const location = templateValue(getSkValue("City", record));
+  const phone = templateValue(getSkValue("Phone", record));
+  const email = templateValue(getSkValue("Email", record));
+  const images = templateValue(getSkValue("Info", record));
+  const notes = [templateValue(getSkValue("Erik's call notes", record)), templateValue(getSkValue("Info for Coders", record))]
+    .filter(Boolean)
+    .join(" | ");
 
-  for (const field of FIELDS) {
-    if (!includeMap.get(field)) continue;
-    let value = choosePromptValue(field, record);
-    if (field === "Company" && companyMissing && fallbackName) value = fallbackName;
-    if (value === null || value === undefined || value === "") continue;
-    lines.push(`${field}: ${value}`);
-  }
-  return lines.join("\n");
+  return `Today we are going to create a new proposal website. Read the website-structure-rules(1).md and follow it exactly. Here is all the information:
+
+Business name: ${businessName}
+Industry: ${industry}
+Location (Can you add an embedded google map of the address of the business): ${location}
+Services they offer:
+IČO:
+
+Contact info:
+- Phone: ${phone}
+- Email: ${email}
+- Address (Can you add an embedded google map of the address of the business if empty disregard):
+- Working hours:
+
+Images (paste any URLs — bazos, facebook, google, whatever they have AND PLEASE ALIGN THE IMAGES BASE ON THE SERVICE): ${images}
+
+Brands/materials they work with (if any):
+
+Extra notes (years in business, selling points, anything special): ${notes}
+
+Create the full website (Limit gallery to 4 cards & featured services to 4 contents) — content.json, index.html, style.css, script.js. Use GSAP + ScrollTrigger for animations.`;
 }
 
 function setStatus(text) {
@@ -162,7 +159,8 @@ function setStatus(text) {
 }
 
 function renderPrompt() {
-  ui.promptOutput.value = buildPromptForRecord(currentRecord);
+  if (isPromptDirty) return;
+  ui.promptOutput.value = buildPromptTemplate(currentRecord);
 }
 
 function setCurrentRecord(record) {
@@ -170,7 +168,40 @@ function setCurrentRecord(record) {
   const meta = record?.meta || {};
   ui.rowText.textContent = meta.rowId ? String(meta.rowId) : "-";
   ui.updatedText.textContent = meta.timestamp || "-";
+  isPromptDirty = false;
+  lastPromptBeforeReset = null;
+  ui.undoResetBtn.classList.add("hidden");
   renderPrompt();
+}
+
+function openTranslationCard(field, anchorElement) {
+  if (!currentRecord) return;
+  const rowId = currentRecord?.meta?.rowId || "-";
+  const sk = getSkValue(field, currentRecord) || "Empty";
+  const en = getEnValue(field, currentRecord) || "Empty";
+  ui.translationCardTitle.textContent = `${field} Translation (Row ${rowId})`;
+  ui.translationSkValue.textContent = String(sk);
+  ui.translationEnValue.textContent = String(en);
+  ui.translationCard.classList.remove("hidden");
+
+  const anchorRect = anchorElement.getBoundingClientRect();
+  const cardRect = ui.translationCard.getBoundingClientRect();
+  const margin = 10;
+  const maxLeft = window.innerWidth - cardRect.width - margin;
+  let left = anchorRect.left;
+  if (left > maxLeft) left = maxLeft;
+  if (left < margin) left = margin;
+
+  let top = anchorRect.top - cardRect.height - margin;
+  if (top < margin) {
+    top = anchorRect.bottom + margin;
+  }
+  ui.translationCard.style.left = `${left}px`;
+  ui.translationCard.style.top = `${top}px`;
+}
+
+function closeTranslationCard() {
+  ui.translationCard.classList.add("hidden");
 }
 
 function columnCellContent(column, record) {
@@ -181,51 +212,31 @@ function columnCellContent(column, record) {
   }
   if (column.id === "row") return displayValue(record?.meta?.rowId ?? "-");
   if (column.id === "updated") return displayValue(record?.meta?.timestamp ?? "-");
-  if (column.id === "action") {
-    const rowId = String(record?.meta?.rowId ?? "");
-    return `
-      <button type="button" class="btn-ghost" data-copy-row-id="${escapeHtml(rowId)}">Copy Prompt</button>
-    `;
-  }
-  if (column.type === "contact") {
-    return displayValue(getContactDisplay(record, column.lang));
-  }
-  if (column.id === "company_sk") return displayValue(getCompanyDisplay(record, "sk"));
-  if (column.id === "company_en") return displayValue(getCompanyDisplay(record, "en"));
-  return displayValue(getValueByLanguage(column.field, column.lang, record));
+  if (column.field === "Company") return displayValue(getCompanyDisplay(record));
+  return displayValue(getSkValue(column.field, record));
 }
 
 function renderHeader() {
   ui.rowTableHead.innerHTML = `
     <tr>
-      ${columns.map((column, index) => `
-        <th draggable="true" data-col-index="${index}" title="Drag to reorder">
-          ${escapeHtml(column.label)}
+      ${columns.map((column) => `
+        <th data-col-id="${escapeHtml(column.id)}">
+          <div class="th-inner">
+            <span>${escapeHtml(column.label)}</span>
+            ${column.type === "field" && TRANSLATION_TOGGLE_FIELDS.has(column.field)
+              ? `<button type="button" class="translate-icon-btn" data-translate-field="${escapeHtml(column.field)}" title="Show translation">EN</button>`
+              : ""}
+          </div>
         </th>
       `).join("")}
     </tr>
   `;
 
-  let dragIndex = null;
-  ui.rowTableHead.querySelectorAll("th[data-col-index]").forEach((th) => {
-    th.addEventListener("dragstart", (event) => {
-      dragIndex = Number(event.target.dataset.colIndex);
-      event.dataTransfer.effectAllowed = "move";
-    });
-    th.addEventListener("dragover", (event) => {
-      event.preventDefault();
-      event.dataTransfer.dropEffect = "move";
-    });
-    th.addEventListener("drop", (event) => {
-      event.preventDefault();
-      const dropIndex = Number(event.target.dataset.colIndex);
-      if (dragIndex === null || dragIndex === dropIndex) return;
-      const nextColumns = [...columns];
-      const [moved] = nextColumns.splice(dragIndex, 1);
-      nextColumns.splice(dropIndex, 0, moved);
-      columns = nextColumns;
-      saveColumns();
-      renderRowTable();
+  ui.rowTableHead.querySelectorAll("button[data-translate-field]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const field = event.currentTarget.dataset.translateField;
+      openTranslationCard(field, event.currentTarget);
     });
   });
 }
@@ -252,31 +263,30 @@ function renderRowTable() {
       const selectedRecord = recordsByRowId.get(rowId);
       if (!selectedRecord) return;
       if (!event.target.checked) {
-        // Keep one row selected so prompt context is always clear.
+        if (String(currentRecord?.meta?.rowId ?? "") === rowId) {
+          currentRecord = null;
+          hasExplicitNoSelection = true;
+          ui.rowText.textContent = "-";
+          ui.updatedText.textContent = "-";
+        }
         renderRowTable();
         return;
       }
+      hasExplicitNoSelection = false;
       setCurrentRecord(selectedRecord);
       renderRowTable();
-    });
-  });
-
-  ui.rowTableBody.querySelectorAll("button[data-copy-row-id]").forEach((button) => {
-    button.addEventListener("click", async (event) => {
-      const rowId = event.target.dataset.copyRowId;
-      const selectedRecord = recordsByRowId.get(rowId);
-      if (!selectedRecord) return;
-      const prompt = buildPromptForRecord(selectedRecord);
-      await navigator.clipboard.writeText(prompt);
-      button.textContent = "Copied";
-      setTimeout(() => {
-        button.textContent = "Copy Prompt";
-      }, 1000);
     });
   });
 }
 
 function syncCurrentRecord() {
+  if (hasExplicitNoSelection) {
+    currentRecord = null;
+    ui.rowText.textContent = "-";
+    ui.updatedText.textContent = "-";
+    return;
+  }
+
   if (!currentRecord) {
     setCurrentRecord(latestRecord);
     return;
@@ -329,12 +339,29 @@ async function fetchRecords() {
 }
 
 ui.promptLanguage.addEventListener("change", () => {
+  isPromptDirty = false;
   renderPrompt();
-  renderRowTable();
+});
+ui.promptOutput.addEventListener("input", () => {
+  isPromptDirty = true;
+});
+ui.resetPromptBtn.addEventListener("click", () => {
+  lastPromptBeforeReset = ui.promptOutput.value;
+  isPromptDirty = false;
+  ui.promptOutput.value = buildPromptTemplate(currentRecord);
+  ui.undoResetBtn.classList.remove("hidden");
+});
+ui.undoResetBtn.addEventListener("click", () => {
+  if (lastPromptBeforeReset === null) return;
+  ui.promptOutput.value = lastPromptBeforeReset;
+  isPromptDirty = true;
+  lastPromptBeforeReset = null;
+  ui.undoResetBtn.classList.add("hidden");
 });
 ui.refreshBtn.addEventListener("click", fetchRecords);
 ui.openPromptBtn.addEventListener("click", openPromptModal);
 ui.closePromptBtn.addEventListener("click", closePromptModal);
+ui.closeTranslationCardBtn.addEventListener("click", closeTranslationCard);
 ui.promptModal.addEventListener("click", (event) => {
   if (event.target === ui.promptModal) closePromptModal();
 });
@@ -342,19 +369,22 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && !ui.promptModal.classList.contains("hidden")) {
     closePromptModal();
   }
+  if (event.key === "Escape" && !ui.translationCard.classList.contains("hidden")) {
+    closeTranslationCard();
+  }
 });
 ui.copyBtn.addEventListener("click", async () => {
   try {
     await navigator.clipboard.writeText(ui.promptOutput.value);
-    ui.copyBtn.textContent = "Copied";
+    ui.copyBtn.textContent = "✓";
     setTimeout(() => {
-      ui.copyBtn.textContent = "Copy Prompt";
-    }, 1000);
+      ui.copyBtn.innerHTML = "&#128203;";
+    }, 900);
   } catch (_error) {
-    ui.copyBtn.textContent = "Copy failed";
+    ui.copyBtn.textContent = "!";
     setTimeout(() => {
-      ui.copyBtn.textContent = "Copy Prompt";
-    }, 1000);
+      ui.copyBtn.innerHTML = "&#128203;";
+    }, 900);
   }
 });
 
