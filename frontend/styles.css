@@ -221,7 +221,11 @@ textarea {
   padding: 11px;
   background: var(--paper-soft);
   line-height: 1.45;
+  min-height: 460px;
   resize: vertical;
+  overflow: auto;
+  overflow-x: hidden;
+  font-family: Consolas, "Courier New", monospace;
 }
 
 .modal-actions {
@@ -260,11 +264,14 @@ textarea {
 }
 
 .modal-panel {
-  width: min(780px, 100%);
-  max-height: calc(100vh - 32px);
+  width: min(1040px, 100%);
+  max-height: calc(100vh - 24px);
   overflow: auto;
   margin-top: 0;
   border: 1px solid #c6d5ce;
+  min-width: 680px;
+  min-height: 520px;
+  resize: both;
 }
 
 .translation-card {
