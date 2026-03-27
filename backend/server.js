@@ -4,6 +4,7 @@ import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import pg from "pg";
 
 try {
   await import("dotenv/config");
@@ -15,6 +16,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const { Pool } = pg;
 
 app.use(cors());
 app.use(express.json());
@@ -25,6 +27,14 @@ let lastRecord = null;
 const recordsByRowId = new Map();
 const CACHE_PATH = path.join(__dirname, "translation-cache.json");
 const translationCache = new Map();
+const DATABASE_URL = process.env.DATABASE_URL || "";
+const useDb = Boolean(DATABASE_URL);
+const pool = useDb
+  ? new Pool({
+      connectionString: DATABASE_URL,
+      ssl: process.env.PGSSL === "disable" ? false : { rejectUnauthorized: false }
+    })
+  : null;
 
 const FIELDS = [
   "First",
@@ -54,6 +64,32 @@ const translationConfig = {
 };
 
 loadTranslationCache();
+
+async function initializeDatabase() {
+  if (!useDb) {
+    console.log("[db] DATABASE_URL not set. Running in memory mode.");
+    return;
+  }
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS proposal_records (
+      sheet_name TEXT NOT NULL,
+      row_id INTEGER NOT NULL,
+      record_data JSONB NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (sheet_name, row_id)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS processed_events (
+      event_key TEXT PRIMARY KEY,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  console.log("[db] postgres ready");
+}
 
 function normalizeRecord(raw) {
   const record = {};
@@ -166,54 +202,143 @@ async function translateRecord(record) {
   return translated;
 }
 
+async function reserveEventKey(eventKey) {
+  if (!useDb) {
+    if (dedupeSet.has(eventKey)) return false;
+    dedupeSet.add(eventKey);
+    return true;
+  }
+
+  const result = await pool.query(
+    "INSERT INTO processed_events (event_key) VALUES ($1) ON CONFLICT DO NOTHING RETURNING event_key",
+    [eventKey]
+  );
+  return result.rowCount > 0;
+}
+
+async function saveRecord(record) {
+  const sheetName = String(record?.meta?.sheetName || "unknown");
+  const rowId = Number(record?.meta?.rowId || 0);
+
+  if (!useDb) {
+    recordsByRowId.set(String(rowId), record);
+    lastRecord = record;
+    return;
+  }
+
+  await pool.query(
+    `
+      INSERT INTO proposal_records (sheet_name, row_id, record_data, updated_at)
+      VALUES ($1, $2, $3::jsonb, NOW())
+      ON CONFLICT (sheet_name, row_id)
+      DO UPDATE SET record_data = EXCLUDED.record_data, updated_at = NOW()
+    `,
+    [sheetName, rowId, JSON.stringify(record)]
+  );
+}
+
+async function getLatestRecord() {
+  if (!useDb) return lastRecord;
+
+  const result = await pool.query(
+    `
+      SELECT record_data
+      FROM proposal_records
+      ORDER BY updated_at DESC
+      LIMIT 1
+    `
+  );
+  if (result.rowCount === 0) return null;
+  return result.rows[0].record_data;
+}
+
+async function getAllRecords() {
+  if (!useDb) {
+    return Array.from(recordsByRowId.values())
+      .sort((a, b) => Number(a?.meta?.rowId || 0) - Number(b?.meta?.rowId || 0));
+  }
+
+  const result = await pool.query(
+    `
+      SELECT record_data
+      FROM proposal_records
+      ORDER BY row_id ASC
+    `
+  );
+  return result.rows.map((row) => row.record_data);
+}
+
 app.post("/api/webhook-v1", async (req, res) => {
-  const body = req.body;
-  if (!body || !body.meta || !body.meta.eventId || !body.meta.rowId) {
-    return res.status(400).json({ error: "Invalid body: meta.eventId + meta.rowId required" });
+  try {
+    const body = req.body;
+    if (!body || !body.meta || !body.meta.eventId || !body.meta.rowId) {
+      return res.status(400).json({ error: "Invalid body: meta.eventId + meta.rowId required" });
+    }
+
+    const { sheetName, rowId, eventId } = body.meta;
+    const key = `${sheetName}:${rowId}:${eventId}`;
+
+    const reserved = await reserveEventKey(key);
+    if (!reserved) {
+      return res.status(200).json({ status: "duplicate_ignored" });
+    }
+
+    const normalized = normalizeRecord(body);
+    normalized.translated = await translateRecord(normalized);
+
+    await saveRecord(normalized);
+    lastRecord = normalized;
+    recordsByRowId.set(String(rowId), normalized);
+    console.log("[webhook-v1] got record", key);
+    return res.status(200).json({ status: "ok", record: normalized });
+  } catch (error) {
+    console.error("[webhook-v1] error", error);
+    return res.status(500).json({ error: "Internal server error" });
   }
-
-  const { sheetName, rowId, eventId } = body.meta;
-  const key = `${sheetName}:${rowId}:${eventId}`;
-
-  if (dedupeSet.has(key)) {
-    return res.status(200).json({ status: "duplicate_ignored" });
-  }
-
-  dedupeSet.add(key);
-  const normalized = normalizeRecord(body);
-  normalized.translated = await translateRecord(normalized);
-
-  lastRecord = normalized;
-  recordsByRowId.set(String(rowId), normalized);
-  console.log("[webhook-v1] got record", key);
-  return res.status(200).json({ status: "ok", record: normalized });
 });
 
-app.get("/api/latest-record", (req, res) => {
-  if (!lastRecord) {
-    return res.status(404).json({ error: "No record yet" });
+app.get("/api/latest-record", async (req, res) => {
+  try {
+    const record = await getLatestRecord();
+    if (!record) {
+      return res.status(404).json({ error: "No record yet" });
+    }
+    res.status(200).json({ record });
+  } catch (error) {
+    console.error("[latest-record] error", error);
+    res.status(500).json({ error: "Internal server error" });
   }
-  res.status(200).json({ record: lastRecord });
 });
 
-app.get("/api/records", (req, res) => {
-  const records = Array.from(recordsByRowId.values())
-    .sort((a, b) => Number(a?.meta?.rowId || 0) - Number(b?.meta?.rowId || 0));
-  res.status(200).json({
-    count: records.length,
-    records
-  });
+app.get("/api/records", async (req, res) => {
+  try {
+    const records = await getAllRecords();
+    res.status(200).json({
+      count: records.length,
+      records
+    });
+  } catch (error) {
+    console.error("[records] error", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 app.get("/api/health", (req, res) => {
   res.status(200).json({
     status: "ok",
+    persistence: useDb ? "postgres" : "memory",
     translationEnabled: canUseTranslation(),
     translationProvider: translationConfig.provider,
     translationTarget: translationConfig.to
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`Server listening on port ${PORT}`);
-});
+try {
+  await initializeDatabase();
+  app.listen(PORT, () => {
+    console.log(`Server listening on port ${PORT}`);
+  });
+} catch (error) {
+  console.error("[startup] failed to initialize server", error);
+  process.exit(1);
+}

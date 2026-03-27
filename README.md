@@ -74,6 +74,23 @@ Notes:
 - Translation cache is stored in `backend/translation-cache.json`.
 - Cached text is reused to stay inside free-tier limits.
 
+## Postgres Persistence
+
+This backend supports persistent storage with PostgreSQL.
+
+Required `.env` values:
+
+```env
+DATABASE_URL=postgres://...
+PGSSL=require
+```
+
+Notes:
+
+- If `DATABASE_URL` is not set, backend runs in memory mode (data resets on restart).
+- With Postgres enabled, records and dedupe events persist across restarts.
+- Health endpoint shows persistence mode: `memory` or `postgres`.
+
 ## Start Backend and Frontend Separately
 
 This project currently serves the frontend from Express, so backend and frontend run in one process.

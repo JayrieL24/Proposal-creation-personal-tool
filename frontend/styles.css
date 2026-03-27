@@ -1,11 +1,14 @@
 :root {
-  --bg: #f4efe6;
-  --paper: #fffdf7;
+  --bg: #f5f1e8;
+  --paper: #fffef9;
+  --paper-soft: #fbf7ee;
   --text: #1f2421;
-  --muted: #5a665f;
-  --line: #d8d1c2;
-  --accent: #045d5d;
-  --accent-soft: #d6ecec;
+  --muted: #5f6b64;
+  --line: #d9d1c3;
+  --accent: #0b6a67;
+  --accent-soft: #d9ece8;
+  --accent-ink: #0a4f4d;
+  --shadow: 0 8px 24px rgba(27, 38, 34, 0.08);
 }
 
 * {
@@ -17,23 +20,25 @@ body {
   font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
   color: var(--text);
   background:
-    radial-gradient(circle at 10% 0%, #fff6dc 0%, transparent 30%),
-    radial-gradient(circle at 100% 100%, #e8f5f5 0%, transparent 25%),
+    radial-gradient(circle at 10% 0%, #fff6dc 0%, transparent 34%),
+    radial-gradient(circle at 100% 100%, #e6f3ee 0%, transparent 28%),
     var(--bg);
 }
 
 .container {
-  max-width: 1100px;
+  max-width: 1380px;
   margin: 0 auto;
-  padding: 24px 16px 48px;
+  padding: 22px 16px 56px;
 }
 
 .header h1 {
   margin: 0;
+  font-size: 1.55rem;
+  letter-spacing: 0.2px;
 }
 
 .header p {
-  margin: 6px 0 0;
+  margin: 7px 0 0;
   color: var(--muted);
 }
 
@@ -41,8 +46,9 @@ body {
   background: var(--paper);
   border: 1px solid var(--line);
   border-radius: 12px;
-  padding: 14px;
-  margin-top: 14px;
+  padding: 15px;
+  margin-top: 12px;
+  box-shadow: var(--shadow);
 }
 
 .status-panel {
@@ -66,36 +72,66 @@ textarea {
 
 #rowCountText {
   color: var(--muted);
+  font-weight: 600;
 }
 
 button {
   border: 1px solid var(--accent);
-  background: var(--accent);
+  background: linear-gradient(180deg, #0f7874 0%, var(--accent) 100%);
   color: #fff;
   border-radius: 8px;
-  padding: 8px 12px;
+  padding: 8px 13px;
+  font-weight: 600;
   cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.2s ease, opacity 0.2s ease;
 }
 
 button:hover {
-  opacity: 0.92;
+  opacity: 0.95;
+  box-shadow: 0 6px 14px rgba(11, 106, 103, 0.28);
+}
+
+button:active {
+  transform: translateY(1px);
 }
 
 table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: auto;
 }
 
 th,
 td {
   border-bottom: 1px solid var(--line);
   text-align: left;
-  padding: 10px 8px;
+  padding: 10px 10px;
   vertical-align: top;
 }
 
 th {
   background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-weight: 700;
+}
+
+.sheet-table th {
+  user-select: none;
+  cursor: grab;
+  white-space: nowrap;
+}
+
+.sheet-table th:active {
+  cursor: grabbing;
+}
+
+.sheet-table tbody tr:hover td {
+  background: #f8f5ec;
+}
+
+.sheet-table input[type="checkbox"] {
+  transform: scale(1.08);
+  accent-color: var(--accent);
 }
 
 .value-empty {
@@ -108,20 +144,88 @@ th {
   font-size: 1.1rem;
 }
 
+.panel h2 {
+  margin: 0 0 10px;
+  font-size: 1rem;
+}
+
 .prompt-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  margin-bottom: 12px;
+}
+
+.prompt-panel label {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.prompt-panel select {
+  width: 100%;
   margin-bottom: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 9px;
+  background: #fff;
+}
+
+.btn-ghost {
+  border: 1px solid #bfcfc8;
+  background: #fff;
+  color: var(--accent-ink);
+  font-weight: 600;
 }
 
 textarea {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 10px;
-  background: #fff;
+  padding: 11px;
+  background: var(--paper-soft);
+  line-height: 1.45;
   resize: vertical;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.fab-btn {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 80;
+  box-shadow: 0 10px 24px rgba(11, 106, 103, 0.32);
+  border-radius: 999px;
+  padding: 11px 16px;
+}
+
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(28, 37, 33, 0.35);
+  backdrop-filter: blur(2px);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 16px;
+  z-index: 100;
+}
+
+.modal.hidden {
+  display: none;
+}
+
+.modal-panel {
+  width: min(780px, 100%);
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  margin-top: 0;
+  border: 1px solid #c6d5ce;
 }
 
 @media (max-width: 900px) {
