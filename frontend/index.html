@@ -56,12 +56,12 @@
               <button id="closePromptBtn" class="btn-ghost" type="button">Close</button>
             </div>
           </div>
-          <label for="promptLanguage">Prompt language</label>
-          <select id="promptLanguage">
-            <option value="auto">Auto (EN -> SK)</option>
-            <option value="en">English only</option>
-            <option value="sk">Slovak only</option>
-          </select>
+          <div class="prompt-tools">
+            <span>Translation tools:</span>
+            <button type="button" class="translate-icon-btn" data-prompt-translate-field="Industry">Industry EN</button>
+            <button type="button" class="translate-icon-btn" data-prompt-translate-field="Erik's call notes">Call Notes EN</button>
+            <button type="button" class="translate-icon-btn" data-prompt-translate-field="Info for Coders">Coder Notes EN</button>
+          </div>
           <textarea id="promptOutput" rows="20" wrap="soft"></textarea>
         </div>
       </div>

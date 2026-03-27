@@ -126,6 +126,15 @@ th {
   white-space: nowrap;
 }
 
+.sheet-table td a {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.sheet-table td a:hover {
+  color: var(--accent-ink);
+}
+
 .table-scroll {
   overflow-x: auto;
   border-radius: 8px;
@@ -221,8 +230,9 @@ textarea {
   padding: 11px;
   background: var(--paper-soft);
   line-height: 1.45;
+  height: 100%;
   min-height: 460px;
-  resize: vertical;
+  resize: none;
   overflow: auto;
   overflow-x: hidden;
   font-family: Consolas, "Courier New", monospace;
@@ -266,7 +276,9 @@ textarea {
 .modal-panel {
   width: min(1040px, 100%);
   max-height: calc(100vh - 24px);
-  overflow: auto;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
   margin-top: 0;
   border: 1px solid #c6d5ce;
   min-width: 680px;
@@ -274,11 +286,14 @@ textarea {
   resize: both;
 }
 
+.modal-panel textarea {
+  flex: 1;
+  overflow: auto;
+}
+
 .translation-card {
   position: fixed;
-  left: 24px;
-  top: 24px;
-  z-index: 95;
+  z-index: 110;
   width: min(360px, calc(100vw - 32px));
   background: var(--paper);
   border: 1px solid var(--line);
@@ -299,6 +314,16 @@ textarea {
   display: grid;
   gap: 8px;
   font-size: 0.95rem;
+}
+
+.translation-card-body a {
+  color: var(--accent);
+  text-decoration: underline;
+  word-break: break-all;
+}
+
+.translation-card-body a:hover {
+  color: var(--accent-ink);
 }
 
 @media (max-width: 900px) {

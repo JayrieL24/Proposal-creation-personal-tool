@@ -16,6 +16,9 @@ const FIELDS = [
 const EXCLUDED_BY_DEFAULT = new Set(["Web price"]);
 const TRANSLATION_TOGGLE_FIELDS = new Set(["Industry", "Erik's call notes", "Info for Coders"]);
 const POLL_MS = 3000;
+const API_BASE = window.location.hostname.includes("onrender.com")
+  ? ""
+  : "https://proposal-creation-personal-tool.onrender.com";
 
 function makeDefaultColumns() {
   const columns = [
@@ -41,7 +44,6 @@ const ui = {
   rowTableBody: document.getElementById("rowTableBody"),
   rowCountText: document.getElementById("rowCountText"),
   promptOutput: document.getElementById("promptOutput"),
-  promptLanguage: document.getElementById("promptLanguage"),
   copyBtn: document.getElementById("copyBtn"),
   resetPromptBtn: document.getElementById("resetPromptBtn"),
   undoResetBtn: document.getElementById("undoResetBtn"),
@@ -78,11 +80,18 @@ function escapeHtml(input) {
     .replaceAll("'", "&#039;");
 }
 
+function linkifyText(text) {
+  if (!text || text === "Empty") return text;
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
+  const escaped = escapeHtml(text);
+  return escaped.replace(urlRegex, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
+}
+
 function displayValue(value) {
   if (value === null || value === undefined || value === "") {
     return '<span class="value-empty">Empty</span>';
   }
-  return escapeHtml(value);
+  return linkifyText(escapeHtml(value));
 }
 
 function getSkValue(field, record = currentRecord) {
@@ -91,16 +100,6 @@ function getSkValue(field, record = currentRecord) {
 
 function getEnValue(field, record = currentRecord) {
   return record?.translated?.[field] ?? null;
-}
-
-function choosePromptValue(field, record = currentRecord) {
-  const mode = ui.promptLanguage.value;
-  const sk = getSkValue(field, record);
-  const en = getEnValue(field, record);
-
-  if (mode === "sk") return sk;
-  if (mode === "en") return en;
-  return en ?? sk;
 }
 
 function templateValue(value) {
@@ -180,22 +179,28 @@ function openTranslationCard(field, anchorElement) {
   const sk = getSkValue(field, currentRecord) || "Empty";
   const en = getEnValue(field, currentRecord) || "Empty";
   ui.translationCardTitle.textContent = `${field} Translation (Row ${rowId})`;
-  ui.translationSkValue.textContent = String(sk);
-  ui.translationEnValue.textContent = String(en);
+  ui.translationSkValue.innerHTML = linkifyText(String(sk));
+  ui.translationEnValue.innerHTML = linkifyText(String(en));
   ui.translationCard.classList.remove("hidden");
 
   const anchorRect = anchorElement.getBoundingClientRect();
   const cardRect = ui.translationCard.getBoundingClientRect();
   const margin = 10;
+  
+  // Calculate horizontal position (centered on button, but keep within viewport)
   const maxLeft = window.innerWidth - cardRect.width - margin;
-  let left = anchorRect.left;
+  let left = anchorRect.left + (anchorRect.width / 2) - (cardRect.width / 2);
   if (left > maxLeft) left = maxLeft;
   if (left < margin) left = margin;
 
+  // Position above the button
   let top = anchorRect.top - cardRect.height - margin;
+  
+  // If not enough space above, position below
   if (top < margin) {
     top = anchorRect.bottom + margin;
   }
+
   ui.translationCard.style.left = `${left}px`;
   ui.translationCard.style.top = `${top}px`;
 }
@@ -292,7 +297,18 @@ function syncCurrentRecord() {
     return;
   }
   const rowId = String(currentRecord?.meta?.rowId ?? "");
-  setCurrentRecord(recordsByRowId.get(rowId) || latestRecord);
+  const updatedRecord = recordsByRowId.get(rowId) || latestRecord;
+  
+  // Update currentRecord without resetting the prompt if user is editing
+  currentRecord = updatedRecord;
+  const meta = updatedRecord?.meta || {};
+  ui.rowText.textContent = meta.rowId ? String(meta.rowId) : "-";
+  ui.updatedText.textContent = meta.timestamp || "-";
+  
+  // Only re-render prompt if user hasn't made manual edits
+  if (!isPromptDirty) {
+    renderPrompt();
+  }
 }
 
 function updateRowSummary() {
@@ -309,39 +325,64 @@ function closePromptModal() {
   document.body.style.overflow = "";
 }
 
+async function loadRecordsFromResponse(response) {
+  if (!response.ok) {
+    setStatus("No records yet.");
+    return;
+  }
+  const data = await response.json();
+  if (!Array.isArray(data?.records)) {
+    setStatus("Records payload was empty.");
+    return;
+  }
+
+  recordsByRowId.clear();
+  data.records.forEach((record) => {
+    const rowId = String(record?.meta?.rowId ?? "");
+    if (rowId) recordsByRowId.set(rowId, record);
+  });
+
+  latestRecord = data.records[data.records.length - 1] || null;
+  syncCurrentRecord();
+  updateRowSummary();
+  renderRowTable();
+  setStatus(`Connected. ${data.count || 0} row(s) loaded.`);
+}
+
 async function fetchRecords() {
   try {
-    const response = await fetch("/api/records", { cache: "no-store" });
-    if (!response.ok) {
-      setStatus("No records yet.");
-      return;
-    }
-    const data = await response.json();
-    if (!Array.isArray(data?.records)) {
-      setStatus("Records payload was empty.");
-      return;
-    }
-
-    recordsByRowId.clear();
-    data.records.forEach((record) => {
-      const rowId = String(record?.meta?.rowId ?? "");
-      if (rowId) recordsByRowId.set(rowId, record);
-    });
-
-    latestRecord = data.records[data.records.length - 1] || null;
-    syncCurrentRecord();
-    updateRowSummary();
-    renderRowTable();
-    setStatus(`Connected. ${data.count || 0} row(s) loaded.`);
+    const response = await fetch(`${API_BASE}/api/records`, { cache: "no-store" });
+    await loadRecordsFromResponse(response);
   } catch (error) {
     setStatus(`Network error: ${error.message}`);
   }
 }
 
-ui.promptLanguage.addEventListener("change", () => {
-  isPromptDirty = false;
-  renderPrompt();
+async function refreshNow() {
+  ui.refreshBtn.disabled = true;
+  const previousText = ui.refreshBtn.textContent;
+  ui.refreshBtn.textContent = "Refreshing...";
+  setStatus("Refreshing data...");
+  const cacheBustUrl = `${API_BASE}/api/records?t=${Date.now()}`;
+
+  try {
+    const response = await fetch(cacheBustUrl, { cache: "no-store" });
+    await loadRecordsFromResponse(response);
+  } catch (error) {
+    setStatus(`Refresh error: ${error.message}`);
+  } finally {
+    ui.refreshBtn.disabled = false;
+    ui.refreshBtn.textContent = previousText;
+  }
+}
+
+document.querySelectorAll("button[data-prompt-translate-field]").forEach((button) => {
+  button.addEventListener("click", (event) => {
+    const field = event.currentTarget.dataset.promptTranslateField;
+    openTranslationCard(field, event.currentTarget);
+  });
 });
+
 ui.promptOutput.addEventListener("input", () => {
   isPromptDirty = true;
 });
@@ -358,7 +399,7 @@ ui.undoResetBtn.addEventListener("click", () => {
   lastPromptBeforeReset = null;
   ui.undoResetBtn.classList.add("hidden");
 });
-ui.refreshBtn.addEventListener("click", fetchRecords);
+ui.refreshBtn.addEventListener("click", refreshNow);
 ui.openPromptBtn.addEventListener("click", openPromptModal);
 ui.closePromptBtn.addEventListener("click", closePromptModal);
 ui.closeTranslationCardBtn.addEventListener("click", closeTranslationCard);
@@ -366,12 +407,8 @@ ui.promptModal.addEventListener("click", (event) => {
   if (event.target === ui.promptModal) closePromptModal();
 });
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && !ui.promptModal.classList.contains("hidden")) {
-    closePromptModal();
-  }
-  if (event.key === "Escape" && !ui.translationCard.classList.contains("hidden")) {
-    closeTranslationCard();
-  }
+  if (event.key === "Escape" && !ui.promptModal.classList.contains("hidden")) closePromptModal();
+  if (event.key === "Escape" && !ui.translationCard.classList.contains("hidden")) closeTranslationCard();
 });
 ui.copyBtn.addEventListener("click", async () => {
   try {
